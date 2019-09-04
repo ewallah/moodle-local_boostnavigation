@@ -108,3 +108,11 @@
 .jsenabled .list-group-item[data-key^="localboostnavigationcustombottomadmins"][data-isexpandable="1"]:not([data-parent-key^="localboostnavigationcustombottomadmins"]) ~ .list-group-item[data-parent-key^="localboostnavigationcustombottomadmins"] > div {
     margin-left: inherit !important;
 }
+
+/* Modify mycourses list feature. */
+/* Make active filters hint smaller and always non-bold. */
+#nav-drawer a.list-group-item[data-key|=localboostnavigationactivefiltershint],
+#nav-drawer div.list-group-item[data-key|=localboostnavigationactivefiltershint] {
+    font-size: 80%;
+    font-weight: normal;
+}

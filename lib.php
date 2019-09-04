@@ -30,7 +30,7 @@ defined('MOODLE_INTERNAL') || die();
  * @param global_navigation $navigation
  */
 function local_boostnavigation_extend_navigation(global_navigation $navigation) {
-    global $CFG, $PAGE, $COURSE;
+    global $CFG, $PAGE, $COURSE, $USER;
 
     // Fetch config.
     $config = get_config('local_boostnavigation');
@@ -104,54 +104,197 @@ function local_boostnavigation_extend_navigation(global_navigation $navigation) 
                 }
             }
         }
-    }
 
-    // Check if admin wanted us to collapse the mycourses node.
-    // We won't support the setting navshowmycoursecategories in this feature as this would have complicated the feature's
-    // JavaScript code quite heavily.
-    if (isset($config->collapsemycoursesnode) && $config->collapsemycoursesnode == true
-            && $CFG->navshowmycoursecategories == false) {
-        // If yes, do it.
-        if ($mycoursesnode) {
-            // Remember the collapsible node for JavaScript.
-            $collapsenodesforjs[] = 'mycourses';
-            // Change the isexpandable attribute for the mycourses node to true (it's the default in Moodle core, just to be safe).
-            $mycoursesnode->isexpandable = true;
-            // Get the user preference for the collapse state of the mycourses node and set the collapse and hidden
-            // node of the course nodes attributes accordingly.
-            // Note: We are somehow abusing the hidden node attribute here for our own purposes. In Boost core, it is
-            // set to true for invisible courses, but these are currently displayed just as visible courses in the
-            // nav drawer, so we accept this abuse.
-            // Additionally, for some crazy reason, the mycourses child nodes also have the isexpandable attribute set to true
-            // by default. We set this to false here as only the mycourses parent node should have isexpandable set to true.
-            $userprefmycoursesnode = get_user_preferences('local_boostnavigation-collapse_mycoursesnode',
-                    $config->collapsemycoursesnodedefault);
-            if ($userprefmycoursesnode == 1) {
-                $mycoursesnode->collapse = true;
-                foreach ($mycourseschildrennodeskeys as $k) {
-                    $childnode = $mycoursesnode->get($k);
-                    $childnode->hidden = true;
-                    $childnode->isexpandable = false;
-                }
-            } else {
-                $mycoursesnode->collapse = false;
-                foreach ($mycourseschildrennodeskeys as $k) {
-                    $childnode = $mycoursesnode->get($k);
-                    $childnode->hidden = false;
-                    $childnode->isexpandable = false;
+        // Otherwise.
+    } else {
+        // Check if admin wanted us to show all of my courses in Boost's nav drawer regardless of the course progress and then to
+        // apply the block_myoverview filters to the mycourses root node list in Boost's nav drawer.
+        // We won't support the setting navshowmycoursecategories in this feature. It would be possible to support it similar to
+        // $config->removemycoursesnode and it has been done before in local_boostcoc, but we want to keep things simple here now.
+        if (isset($config->modifymycoursesrootnodesshowfiltered) && $config->modifymycoursesrootnodesshowfiltered == true
+                && $CFG->navshowmycoursecategories == false) {
+            // If yes, do it.
+            if ($mycoursesnode) {
+                // Get list of my courses.
+                $mycourses = enrol_get_my_courses();
+                // Do only if I am enrolled in at least one course.
+                if (count($mycourses) > 0) {
+                    // Get the current filter setting, falling back to COURSE_TIMELINE_INPROGRESS if the user preference does not
+                    // exist yet.
+                    $currentfilter = get_user_preferences('block_myoverview_user_grouping_preference', COURSE_TIMELINE_INPROGRESS);
+
+                    // Do only if we are dealing with another filter than COURSE_TIMELINE_INPROGRESS as this is already the list
+                    // how it is delivered by Moodle core.
+                    if ($currentfilter != COURSE_TIMELINE_INPROGRESS) {
+                        // If the filter is set to show favourite courses.
+                        if ($currentfilter == COURSE_FAVOURITES) {
+                            // Get the favourite courses.
+                            $favouritecourseids = [];
+                            $ufservice = \core_favourites\service_factory::get_service_for_user_context(
+                                    \context_user::instance($USER->id)
+                            );
+                            $favourites = $ufservice->find_favourites_by_type('core_course', 'courses');
+                            if ($favourites) {
+                                $favouritecourseids = array_map(
+                                        function ($favourite) {
+                                            return $favourite->itemid;
+                                        }, $favourites);
+                            }
+                            list($filteredcourses, $processedcount) = course_filter_courses_by_favourites(
+                                    $mycourses,
+                                    $favouritecourseids
+                            );
+
+                            // If the filter is set to any other value.
+                        } else {
+                            // Get the filtered courses.
+                            list($filteredcourses, $processedcount) = course_filter_courses_by_timeline_classification(
+                                    $mycourses,
+                                    $currentfilter
+                            );
+                        }
+
+                        // Reduce complexity of the list of filtered courses.
+                        if ($filteredcourses) {
+                            $filteredcoursesids = array_map(
+                                    function ($course) {
+                                        return $course->id;
+                                    }, $filteredcourses);
+                        }
+
+                        // Check all courses below the mycourses node if they are shown and should not or
+                        // if they are not shown and should.
+                        foreach ($mycourseschildrennodeskeys as $k) {
+                            // If the node is in the list of shown courses.
+                            if (in_array($k, $filteredcoursesids)) {
+                                // Show the course node.
+                                $mycoursesnode->get($k)->showinflatnavigation = true;
+
+                                // Otherwise.
+                            } else {
+                                // Hide the course node.
+                                $mycoursesnode->get($k)->showinflatnavigation = false;
+                            }
+                        }
+                    }
                 }
             }
         }
-        // If the node shouldn't be collapsed, set some node attributes to avoid side effects with the CSS styles
-        // which ship with this plugin.
-    } else {
-        if ($mycoursesnode) {
-            // Change the isexpandable attribute for the mycourses parent node to false.
-            $mycoursesnode->isexpandable = false;
-            // Change the isexpandable attribute for the mycourses child node to false.
-            foreach ($mycourseschildrennodeskeys as $k) {
-                $childnode = $mycoursesnode->get($k);
-                $childnode->isexpandable = false;
+
+        // Check if admin wanted us to add the active filters hint root node or to add the change filter link root node
+        // to the mycourses list in Boost's nav drawer.
+        if ((isset($config->modifymycoursesrootnodesfilterhint) && $config->modifymycoursesrootnodesfilterhint == true) ||
+                (isset($config->modifymycoursesrootnodesshowfiltered) && $config->modifymycoursesrootnodesshowfiltered == true &&
+                isset($config->modifymycoursesrootnodesfilterlink) && $config->modifymycoursesrootnodesfilterlink == true)) {
+            // If yes, do it.
+            if ($mycoursesnode) {
+                // Do only if I am enrolled in at least one course.
+                if (count($mycourseschildrennodeskeys) > 0) {
+                    // Prepare string.
+                    $hintstring = '';
+
+                    // Create active filters hint.
+                    if ($config->modifymycoursesrootnodesfilterhint == true) {
+                        // If showing filtered courses is enabled, build active filters hint string.
+                        if ($config->modifymycoursesrootnodesshowfiltered == true) {
+                            // Get the current filter setting.
+                            $currentfilter = get_user_preferences('block_myoverview_user_grouping_preference',
+                                    COURSE_TIMELINE_INPROGRESS);
+
+                            // Build the active filters hint.
+                            $hintstring = get_string('mycoursesrootnodesfilterhintenabledcurrentfilter', 'local_boostnavigation');
+                            $hintstring .= ' ';
+                            $hintstring .= get_string($currentfilter, 'block_myoverview');
+
+                            // Otherwise hardcode the inprogress filter.
+                        } else {
+                            // Build the active filters hint.
+                            $hintstring = get_string('mycoursesrootnodesfilterhintenabledcourselist', 'local_boostnavigation');
+                            $hintstring .= ' ';
+                            $hintstring .= get_string(COURSE_TIMELINE_INPROGRESS, 'block_myoverview');
+                        }
+                    }
+
+                    // Create change filters link.
+                    if ($config->modifymycoursesrootnodesfilterlink == true && $PAGE->pagelayout !== 'mydashboard') {
+                        // Only do if showing filtered courses is enabled.
+                        if ($config->modifymycoursesrootnodesshowfiltered == true) {
+                            // Add line break if both settings are enabled.
+                            if ($config->modifymycoursesrootnodesfilterhint == true) {
+                                $hintstring .= html_writer::empty_tag('br');
+                            }
+
+                            $url = new moodle_url('/my/'); // Link target: Dashboard.
+                            $hintstring .= html_writer::link($url,
+                                    get_string('mycoursesrootnodesfilterlink', 'local_boostnavigation'));
+                        }
+                    }
+
+                    // If we really have a node to recreate now.
+                    if ($hintstring != '') {
+                        // Create new navigation node.
+                        // (use TYPE_COURSE to get the correct indent instead of TYPE_CUSTOM which would be semantically correct).
+                        $hintnode = navigation_node::create($hintstring, null, global_navigation::TYPE_COURSE, null,
+                                'localboostnavigationactivefiltershint', new pix_icon('i/filter', ''));
+
+                        // Show the navigation node in Boost's nav drawer.
+                        $hintnode->showinflatnavigation = true;
+
+                        // Add the node to the mycourses list in Boost's nav drawer (will be added at the end where we want it to be).
+                        $mycoursesnode->add_node($hintnode);
+                    }
+                }
+            }
+        }
+
+        // Check if admin wanted us to collapse the mycourses node.
+        // We won't support the setting navshowmycoursecategories in this feature as this would have complicated the feature's
+        // JavaScript code quite heavily.
+        if (isset($config->collapsemycoursesnode) && $config->collapsemycoursesnode == true
+                && $CFG->navshowmycoursecategories == false) {
+            // If yes, do it.
+            if ($mycoursesnode) {
+                // Remember the collapsible node for JavaScript.
+                $collapsenodesforjs[] = 'mycourses';
+                // Change the isexpandable attribute for the mycourses node to true (it's the default in Moodle core,
+                // just to be safe).
+                $mycoursesnode->isexpandable = true;
+                // Get the user preference for the collapse state of the mycourses node and set the collapse and hidden
+                // node of the course nodes attributes accordingly.
+                // Note: We are somehow abusing the hidden node attribute here for our own purposes. In Boost core, it is
+                // set to true for invisible courses, but these are currently displayed just as visible courses in the
+                // nav drawer, so we accept this abuse.
+                // Additionally, for some crazy reason, the mycourses child nodes also have the isexpandable attribute set to true
+                // by default. We set this to false here as only the mycourses parent node should have isexpandable set to true.
+                $userprefmycoursesnode = get_user_preferences('local_boostnavigation-collapse_mycoursesnode',
+                        $config->collapsemycoursesnodedefault);
+                if ($userprefmycoursesnode == 1) {
+                    $mycoursesnode->collapse = true;
+                    foreach ($mycourseschildrennodeskeys as $k) {
+                        $childnode = $mycoursesnode->get($k);
+                        $childnode->hidden = true;
+                        $childnode->isexpandable = false;
+                    }
+                } else {
+                    $mycoursesnode->collapse = false;
+                    foreach ($mycourseschildrennodeskeys as $k) {
+                        $childnode = $mycoursesnode->get($k);
+                        $childnode->hidden = false;
+                        $childnode->isexpandable = false;
+                    }
+                }
+            }
+            // If the node shouldn't be collapsed, set some node attributes to avoid side effects with the CSS styles
+            // which ship with this plugin.
+        } else {
+            if ($mycoursesnode) {
+                // Change the isexpandable attribute for the mycourses parent node to false.
+                $mycoursesnode->isexpandable = false;
+                // Change the isexpandable attribute for the mycourses child node to false.
+                foreach ($mycourseschildrennodeskeys as $k) {
+                    $childnode = $mycoursesnode->get($k);
+                    $childnode->isexpandable = false;
+                }
             }
         }
     }

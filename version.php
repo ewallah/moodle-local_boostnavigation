@@ -29,4 +29,5 @@ $plugin->version = 2019082700;
 $plugin->release = 'v3.7-r3';
 $plugin->requires = 2019052000;
 $plugin->maturity = MATURITY_STABLE;
-$plugin->dependencies = array('theme_boost' => 2019052000);
+$plugin->dependencies = array('theme_boost' => 2019052000,
+                              'block_myoverview' => 2019052000);

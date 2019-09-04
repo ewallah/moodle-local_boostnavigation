@@ -6,6 +6,8 @@ Changes
 
 ### Unreleased
 
+* 2019-09-04 - Feature: Adopt the features the modify the My courses nodes list from the plugin local_boostcoc to local_boostnavigation.
+               Please don't enable these new features when you still have local_boostcoc in production.
 * 2019-09-04 - Fix flaws in the settings page regarding a link to other settings.
 
 ### v3.7-r3
